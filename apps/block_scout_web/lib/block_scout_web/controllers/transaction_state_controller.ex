@@ -28,9 +28,21 @@ defmodule BlockScoutWeb.TransactionStateController do
            Chain.hash_to_transaction(
              transaction_hash,
              necessity_by_association: %{
-               [block: :miner] => :optional,
-               from_address: :optional,
-               to_address: :optional
+               [
+                 token_transfers: [
+                   from_address: [:names, :proxy_implementations],
+                   to_address: [:names, :proxy_implementations]
+                 ]
+               ] => :optional,
+               [
+                 internal_transactions: [
+                   from_address: [:names, :proxy_implementations],
+                   to_address: [:names, :proxy_implementations]
+                 ]
+               ] => :optional,
+               [block: [miner: :names]] => :optional,
+               [from_address: [:names, :proxy_implementations]] => :optional,
+               [to_address: [:names, :proxy_implementations]] => :optional
              }
            ),
          {:ok, false} <-

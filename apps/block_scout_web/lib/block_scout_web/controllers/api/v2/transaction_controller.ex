@@ -421,7 +421,23 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     with {:ok, transaction, _transaction_hash} <-
            validate_transaction(transaction_hash_string, params,
              necessity_by_association:
-               Map.merge(@transaction_necessity_by_association, %{[block: [miner: :names]] => :optional}),
+               Map.merge(@transaction_necessity_by_association, %{
+                 [
+                   token_transfers: [
+                     from_address: [:names, :proxy_implementations],
+                     to_address: [:names, :proxy_implementations]
+                   ]
+                 ] => :optional,
+                 [
+                   internal_transactions: [
+                     from_address: [:names, :proxy_implementations],
+                     to_address: [:names, :proxy_implementations]
+                   ]
+                 ] => :optional,
+                 [block: [miner: :names]] => :optional,
+                 [from_address: [:names, :proxy_implementations]] => :optional,
+                 [to_address: [:names, :proxy_implementations]] => :optional
+               }),
              api?: true
            ) do
       state_changes_plus_next_page =

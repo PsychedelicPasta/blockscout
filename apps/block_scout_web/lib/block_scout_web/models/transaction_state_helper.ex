@@ -16,9 +16,15 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
   {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
+  @spec state_changes(Transaction.t(), [Chain.paging_options() | Chain.api?()]) :: [StateChange.t()]
   def state_changes(transaction, options \\ [])
 
-  def state_changes(%Transaction{block: %Block{}} = transaction, options) do
+  def state_changes(
+        %Transaction{block: %Block{}, token_transfers: token_transfers, internal_transactions: internal_transactions} =
+          transaction,
+        options
+      )
+      when is_list(token_transfers) and is_list(internal_transactions) do
     paging_options = Keyword.get(options, :paging_options, default_paging_options())
     {offset} = paging_options.key || {0}
 
@@ -48,46 +54,29 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
     state_changes
   end
 
-  defp do_state_changes(%Transaction{block: %Block{} = block} = transaction, options) do
-    transaction_hash = transaction.hash
-
-    full_options = [
-      necessity_by_association: %{
-        [from_address: :smart_contract] => :optional,
-        [to_address: :smart_contract] => :optional,
-        [from_address: :names] => :optional,
-        [to_address: :names] => :optional,
-        from_address: :required,
-        to_address: :required
-      },
-      # we need to consider all token transfers in block to show whole state change of transaction
-      paging_options: %PagingOptions{key: nil, page_size: nil},
-      api?: Keyword.get(options, :api?, false)
-    ]
-
-    token_transfers = Chain.transaction_to_token_transfers(transaction_hash, full_options)
-
+  defp do_state_changes(
+         %Transaction{block: block, internal_transactions: internal_transactions, token_transfers: token_transfers} =
+           transaction,
+         options
+       ) do
     block_txs =
       Chain.block_to_transactions(block.hash,
-        necessity_by_association: %{},
+        necessity_by_association: %{token_transfers: :optional, internal_transactions: :optional},
         paging_options: %PagingOptions{key: nil, page_size: nil},
         api?: Keyword.get(options, :api?, false)
       )
 
     previous_block_number = BlockNumberHelper.previous_block_number(block.number)
 
-    from_before_block = coin_balance(transaction.from_address_hash, previous_block_number, options)
-    to_before_block = coin_balance(transaction.to_address_hash, previous_block_number, options)
-    miner_before_block = coin_balance(block.miner_hash, previous_block_number, options)
+    coin_balances_before_block = StateChanges.transaction_to_coin_balances()
 
-    {from_before_tx, to_before_tx, miner_before_tx} =
-      StateChange.coin_balances_before(transaction, block_txs, from_before_block, to_before_block, miner_before_block)
+    coin_balances_before_tx = StateChange.coin_balances_before(transaction, block_txs, coin_balances_before_block)
 
-    native_coin_entries = StateChange.native_coin_entries(transaction, from_before_tx, to_before_tx, miner_before_tx)
+    native_coin_entries = StateChange.native_coin_entries(transaction, coin_balances_before_tx)
 
     token_balances_before =
       token_transfers
-      |> Enum.reduce(%{}, &token_transfers_to_balances_reducer(&1, &2, options))
+      |> Enum.reduce(%{}, &token_transfers_to_balances_reducer(&1, &2, previous_block_number, options))
       |> StateChange.token_balances_before(transaction, block_txs)
 
     tokens_entries = StateChange.token_entries(token_transfers, token_balances_before)
@@ -145,11 +134,10 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
     end
   end
 
-  defp token_transfers_to_balances_reducer(transfer, balances, options) do
+  defp token_transfers_to_balances_reducer(transfer, balances, prev_block, options) do
     from = transfer.from_address
     to = transfer.to_address
     token_hash = transfer.token_contract_address_hash
-    prev_block = BlockNumberHelper.previous_block_number(transfer.block_number)
 
     balances
     |> case do
